@@ -1,0 +1,121 @@
+import os
+import pandas as pd
+
+# Define input folders
+folder1 = "C:/Users/thaplood2/Documents/Story_Math_analysis/commonHCP262_172_JC_threshold_fisher_transformation_pearson_math_predefined/"
+folder2 = "C:/Users/thaplood2/Documents/Story_Math_analysis/commonHCP262_172_JC_threshold_fisher_transformation_pearson_story/"
+output_folder = "C:/Users/thaplood2/Documents/Story_Math_analysis/common"
+
+# Ensure output folder exists
+os.makedirs(output_folder, exist_ok=True)
+
+# Get subject file names from both folders
+subjects1 = {f.split('_')[0]: f for f in os.listdir(folder1) if f.endswith('.xlsx')}
+subjects2 = {f.split('_')[0]: f for f in os.listdir(folder2) if f.endswith('.xlsx')}
+
+# Find common subjects in both folders
+common_subjects = set(subjects1.keys()) & set(subjects2.keys())
+
+print("Common subjects found:", common_subjects)
+
+for subject in common_subjects:
+    print(f"Processing subject: {subject}")
+    
+    # Get the paths for each subject's file in both folders
+    file1 = os.path.join(folder1, subjects1[subject])
+    file2 = os.path.join(folder2, subjects2[subject])
+    
+    print(f"Processing files: {file1} and {file2}")
+
+    # Define hemisphere and interhemispheric sheet names
+    hemispheres = ["LH", "RH"]
+    inter = "inter"
+    
+    # Initialize dictionary to store results for each subject
+    common_data = {}
+    connection_names = {}
+
+    for hemi in hemispheres:
+        # Define sheet names for math and story
+        sig_sheet = f"sigConn_{hemi}"
+        fc_sheet = f"{hemi}_fc"
+        
+        # Check if the required sheet exists in both files
+        try:
+            if fc_sheet not in pd.ExcelFile(file1).sheet_names:
+                raise ValueError(f"Sheet {fc_sheet} not found in {file1}")
+            if fc_sheet not in pd.ExcelFile(file2).sheet_names:
+                raise ValueError(f"Sheet {fc_sheet} not found in {file2}")
+            
+            # Load the FC sheets for both math and story
+            fc1 = pd.read_excel(file1, sheet_name=fc_sheet)
+            fc2 = pd.read_excel(file2, sheet_name=fc_sheet)
+            
+            # Select the first 104 columns (time points) if available, otherwise use all available time points
+            num_time_points = min(104, fc1.shape[1])  # Get the minimum between 104 and the available columns (time points)
+            fc1 = fc1.iloc[:, 1:num_time_points+1]  # Skip the first column (index) and select columns for time points
+            fc2 = fc2.iloc[:, 1:num_time_points+1]  # Skip the first column (index) and select columns for time points
+            
+            # Store the math and story FC values for each hemisphere
+            common_data[f"{hemi}_fc_math"] = fc1
+            common_data[f"{hemi}_fc_story"] = fc2
+            
+            # Load the connection names (ROI pairs) from the sigConn sheet
+            df_sig = pd.read_excel(file1, sheet_name=sig_sheet, usecols=[1, 2])  # ROI1, ROI2
+            connection_names[f"{hemi}_conn"] = df_sig  # Store the ROI pairs as connections
+        
+        except Exception as e:
+            print(f"Error processing {hemi} sheets for subject {subject}: {e}")
+            raise  # Stop the script on error
+    
+    # Process interhemispheric connections (inter)
+    try:
+        sig_sheet_inter = "sigConn_inter_"
+        fc_sheet_inter = "inter_fc_"
+        
+        # Check if the interhemispheric sheet exists
+        if fc_sheet_inter not in pd.ExcelFile(file1).sheet_names:
+            raise ValueError(f"Sheet {fc_sheet_inter} not found in {file1}")
+        if fc_sheet_inter not in pd.ExcelFile(file2).sheet_names:
+            raise ValueError(f"Sheet {fc_sheet_inter} not found in {file2}")
+        
+        # Load the interhemispheric FC sheets for both math and story
+        fc1_inter = pd.read_excel(file1, sheet_name=fc_sheet_inter)
+        fc2_inter = pd.read_excel(file2, sheet_name=fc_sheet_inter)
+        
+        # Select the first 104 columns (time points) if available, otherwise use all available time points
+        num_time_points_inter = min(104, fc1_inter.shape[1])  # Get the minimum between 104 and the available columns (time points)
+        fc1_inter = fc1_inter.iloc[:, 1:num_time_points_inter+1]  # Skip the first column (index) and select columns for time points
+        fc2_inter = fc2_inter.iloc[:, 1:num_time_points_inter+1]  # Skip the first column (index) and select columns for time points
+        
+        # Store the interhemispheric FC values for both math and story
+        common_data["inter_fc_math"] = fc1_inter
+        common_data["inter_fc_story"] = fc2_inter
+        
+        # Load the connection names (ROI pairs) for interhemispheric connections
+        df_sig_inter = pd.read_excel(file1, sheet_name=sig_sheet_inter, usecols=[1, 2])  # ROI1, ROI2
+        connection_names["inter_conn"] = df_sig_inter  # Store the ROI pairs as interhemispheric connections
+    
+    except Exception as e:
+        print(f"Error processing interhemispheric sheets for subject {subject}: {e}")
+        raise  # Stop the script on error
+    
+    # Save results to an Excel file for the subject
+    try:
+        output_file = os.path.join(output_folder, f"{subject}_common_connections.xlsx")
+        with pd.ExcelWriter(output_file) as writer:
+            # Write FC data for each hemisphere and interhemispheric
+            for sheet_name, df in common_data.items():
+                df.to_excel(writer, sheet_name=sheet_name, index=False)
+            
+            # Write connection names for each hemisphere and interhemispheric
+            for sheet_name, df in connection_names.items():
+                df.to_excel(writer, sheet_name=sheet_name, index=False)
+        
+        print(f"Results saved for subject: {subject}")
+    
+    except Exception as e:
+        print(f"Error saving results for subject {subject}: {e}")
+        raise  # Stop the script on error
+
+print("All subjects processed!")
