@@ -1,0 +1,117 @@
+import os
+import pandas as pd
+import networkx as nx
+import numpy as np
+
+# Define the path to the specific Excel file for one subject
+excel_file = 'C:/Users/thaplood2/Documents/955465_jackknife_sigConn_aparc35.xlsx'  # Update with the subject's file path
+
+# Extract the subject's ID from the Excel file name (e.g., '100206' from '100206_jackknife...')
+subject_id = os.path.basename(excel_file).split('_')[0]
+
+# Define sheet name pairs for analysis
+sheets = [
+    ('sigConn_LH', 'LH_fc'),
+    ('sigConn_RH', 'RH_fc'),
+    ('sigConn_inter_', 'inter_fc_')
+]
+output_data = {}
+
+# Loop through each pair of sheets (sigConn and fc) separately
+for sigconn_sheet, fc_sheet in sheets:
+    try:
+        # Load the data for the sigConn and fc sheets
+        roi_pairs_df = pd.read_excel(excel_file, sheet_name=sigconn_sheet, header=[0, 1], index_col=0)
+        correlation_values = pd.read_excel(excel_file, sheet_name=fc_sheet).values  # Shape assumed to be (number of ROI pairs, 294 time points)
+        
+        # Extract ROI pairs and unique ROIs
+        roi_pairs = roi_pairs_df.values
+        unique_rois = np.unique(roi_pairs)
+        
+        # Initialize a list to store metrics for each time point
+        time_point_metrics = []
+        
+        # Step 1: Loop through each time point
+        for time_point in range(correlation_values.shape[1]):
+            # Initialize a graph for each time point
+            G = nx.Graph()
+            
+            # Add nodes to the graph
+            for roi in unique_rois:
+                G.add_node(roi)
+            
+            # Add edges with weights based on correlation values
+            for i, (roi1, roi2) in enumerate(roi_pairs):
+                weight = correlation_values[i, time_point]
+                # Add edge only if the correlation is above a certain threshold (optional step)
+                if weight > 0:  # You can modify this threshold if needed
+                    G.add_edge(roi1, roi2, weight=weight)
+            
+            # Check if the graph is fully connected
+            if nx.is_connected(G):
+                # Compute centrality measures for the whole graph
+                communities = list(nx.algorithms.community.greedy_modularity_communities(G))
+                community_map = {node: idx for idx, community in enumerate(communities) for node in community}
+                
+                # Centrality measures
+                eigen_centrality = nx.eigenvector_centrality(G, max_iter=1000, weight='weight')
+                degree_centrality = nx.degree_centrality(G)
+                betweenness_centrality = nx.betweenness_centrality(G, weight='weight')
+                clustering_coeff = nx.clustering(G, weight='weight')
+                
+                # Store results for each node
+                for node in G.nodes:
+                    time_point_metrics.append({
+                        'TimePoint': time_point,
+                        'Node': node,
+                        'Community': community_map.get(node, -1),  # -1 for nodes not assigned to any community
+                        'EigenvectorCentrality': eigen_centrality.get(node, 0),
+                        'DegreeCentrality': degree_centrality.get(node, 0),
+                        'BetweennessCentrality': betweenness_centrality.get(node, 0),
+                        'ClusteringCoefficient': clustering_coeff.get(node, 0),
+                    })
+            else:
+                print(f"Graph for '{fc_sheet}' at time point {time_point} is not fully connected. Analyzing connected components.")
+                # If the graph is not fully connected, compute centrality measures for each connected component
+                connected_components = list(nx.connected_components(G))
+                for component in connected_components:
+                    subgraph = G.subgraph(component)
+                    
+                    # Compute community detection for each connected component
+                    communities = list(nx.algorithms.community.greedy_modularity_communities(subgraph))
+                    community_map = {node: idx for idx, community in enumerate(communities) for node in community}
+                    
+                    # Centrality measures for the subgraph
+                    eigen_centrality = nx.eigenvector_centrality(subgraph, max_iter=1000, weight='weight')
+                    degree_centrality = nx.degree_centrality(subgraph)
+                    betweenness_centrality = nx.betweenness_centrality(subgraph, weight='weight')
+                    clustering_coeff = nx.clustering(subgraph, weight='weight')
+                    
+                    # Store results for each node in the component
+                    for node in subgraph.nodes:
+                        time_point_metrics.append({
+                            'TimePoint': time_point,
+                            'Node': node,
+                            'Community': community_map.get(node, -1),
+                            'EigenvectorCentrality': eigen_centrality.get(node, 0),
+                            'DegreeCentrality': degree_centrality.get(node, 0),
+                            'BetweennessCentrality': betweenness_centrality.get(node, 0),
+                            'ClusteringCoefficient': clustering_coeff.get(node, 0),
+                        })
+        
+        # Convert results to DataFrame and store in output_data dictionary
+        output_data[fc_sheet] = pd.DataFrame(time_point_metrics)
+    
+    except Exception as e:
+        print(f"Error processing {sigconn_sheet} and {fc_sheet}: {e}")
+        continue
+
+# Save all results to an Excel file with separate sheets for each region
+output_file = f'C:/Users/thaplood2/Documents/Subjects/{subject_id}/time_point_centrality_analysis_{subject_id}.xlsx'
+os.makedirs(os.path.dirname(output_file), exist_ok=True)
+
+with pd.ExcelWriter(output_file) as writer:
+    for sheet_name, metrics_df in output_data.items():
+        metrics_df.to_excel(writer, index=False, sheet_name=sheet_name)
+
+print(f"Analysis complete for {subject_id}. Results saved to {output_file}.")
