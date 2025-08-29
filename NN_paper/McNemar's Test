@@ -1,0 +1,55 @@
+# Author: Adebiyi Sobitan, PhD
+# Date: August 15, 2025
+
+#setwd("C:/
+
+chooseCRANmirror(ind=1)
+
+install.packages(c("exact2x2", "contingencytables", "tidyverse", "readxl", "dplyr"))
+
+library(exact2x2)
+library(contingencytables)
+library(tidyverse)
+library(readxl)
+library(dplyr)
+
+# Create a 2x2 matrix representing the contingency table
+data <- matrix(c(20, 19, 0, 0), nrow = 2,
+         dimnames = list("Traditional_Spearman" = c("Present", "Absent"),
+                   "Jackknife_Pearson" = c("Present", "Absent")))
+
+# Display the contingency table
+print("Contingency table:")
+print(data)
+
+result_with_correction <- mcnemar.test(data)
+print("McNemar's Test with continuity correction:")
+print(result_with_correction)
+
+# Perform McNemar's Test without continuity correction
+result_without_correction <- mcnemar.test(data, correct = FALSE)
+print("McNemar's Test without continuity correction:")
+print(result_without_correction)
+
+#exact McNemar's Test
+Mc_exact<- mcnemar.exact(data)
+print(Mc_exact)
+
+# second option. Change values for each new analysis
+# Create a 2x2 matrix representing the contingency table
+data2 <- matrix(c(99, 0, 22, 0), nrow = 2, byrow = TRUE,
+         dimnames = list("Traditional_Spearman" = c("Present", "Absent"),
+                   "Jackknife_Spearman" = c("Present", "Absent")))
+
+Mc_exact2<- mcnemar.exact(data2)
+print(Mc_exact2)
+str(Mc_exact2)
+
+my_pvalues<- data.frame(
+    Metric = c("Point probability", "Conditional exact", "Unconditional exact"),
+    P_value = c(Mc_exact2$p.value.point, Mc_exact2$p.value.cond, Mc_exact2$p.value.uncond)
+)
+
+my_pvalues$P_value <- round(my_pvalues$P_value, 4)
+
+my_pvalues
