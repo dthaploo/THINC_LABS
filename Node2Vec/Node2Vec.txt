@@ -1,0 +1,111 @@
+import os
+import pandas as pd
+import networkx as nx
+from node2vec import Node2Vec
+
+# Directory containing subject files
+subject_files_dir = 'C:/Users/thaplood2/Documents/Subjects/176037/'  # Update this path
+
+# List of all subject file paths
+subject_files = [f for f in os.listdir(subject_files_dir) if f.endswith('aparc35.xlsx')]
+
+# Define the regions and corresponding sheet names
+regions = {
+    'inter': ('sigConn_inter', 'inter_fc'),
+    'LH': ('sigConn_LH', 'LH_fc'),
+    'RH': ('sigConn_RH', 'RH_fc')
+}
+
+# Function to save all outputs to one Excel file per subject and region in a folder
+def save_subject_results(subject_code, region, embeddings_df, properties_df, edges_df, summary_df):
+    # Create folder based on subject code if it doesn't already exist
+    output_folder = os.path.join(subject_files_dir, f'{subject_code}_node2vec')
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+
+    # Define the output file path
+    output_filename = os.path.join(output_folder, f'{subject_code}_{region}_analysis_results.xlsx')
+
+    # Save the different DataFrames to the Excel file with multiple sheets
+    with pd.ExcelWriter(output_filename, engine='openpyxl') as writer:
+        embeddings_df.to_excel(writer, sheet_name='Node Embeddings')
+        properties_df.to_excel(writer, sheet_name='Graph Properties')
+        edges_df.to_excel(writer, sheet_name='Edges and Weights')
+        summary_df.to_excel(writer, sheet_name='Summary Statistics')
+
+    print(f"All outputs have been saved to '{output_filename}' for {subject_code} - {region.upper()}.")
+
+# Process each subject file
+for subject_file in subject_files:
+    subject_code = os.path.splitext(subject_file)[0]  # Extract subject code from filename
+    file_path = os.path.join(subject_files_dir, subject_file)
+    
+    # Process each region (inter, LH, RH)
+    for region, (sig_conn_sheet, fc_sheet) in regions.items():
+        # Load the respective sheets for ROI pairs and correlations
+        roi_edges = pd.read_excel(file_path, sheet_name=sig_conn_sheet)
+        correlations = pd.read_excel(file_path, sheet_name=fc_sheet)
+        
+        # Create graphs for each time point
+        num_timepoints = correlations.shape[1]  # Assuming columns are time points
+        all_embeddings = []  # To store embeddings for each time point
+        all_properties = []  # To store properties for each time point
+        
+        for t in range(num_timepoints):
+            G = nx.Graph()
+            for i, row in roi_edges.iterrows():
+                roi1 = row['ROI1']
+                roi2 = row['ROI2']
+                weight = correlations.iloc[i, t]  # Correlation value at time point t
+                G.add_edge(roi1, roi2, weight=weight)
+            
+            # Step 4: Apply Node2Vec to each graph and store embeddings
+            node2vec = Node2Vec(G, dimensions=64, walk_length=30, num_walks=200, p=1, q=1, workers=8)
+            model = node2vec.fit(window=10, min_count=1, batch_words=4)
+            embeddings = {node: model.wv[node] for node in G.nodes()}
+            all_embeddings.append(embeddings)  # Store embeddings for the current time point
+
+            # Step 2: Calculate Graph Properties for this time point
+            degree_centrality = nx.degree_centrality(G)
+            betweenness_centrality = nx.betweenness_centrality(G)
+
+            # Store the properties for each node at this time point
+            properties_df = pd.DataFrame({
+                'Node': degree_centrality.keys(),
+                'Degree Centrality': degree_centrality.values(),
+                'Betweenness Centrality': betweenness_centrality.values(),
+                'Time Point': [t] * len(degree_centrality)  # Add time point for each node
+            })
+            all_properties.append(properties_df)  # Store the properties for this time point
+
+        # Flatten embeddings across all time points into a DataFrame
+        embeddings_flat = []
+        for t, embeddings in enumerate(all_embeddings):
+            for node, emb in embeddings.items():
+                embeddings_flat.append([node, t] + list(emb))
+        embeddings_df = pd.DataFrame(embeddings_flat, columns=['Node', 'Time Point'] + [f'Embedding_{i+1}' for i in range(64)])
+
+        # Flatten properties across all time points into a single DataFrame
+        properties_df_flat = pd.concat(all_properties, ignore_index=True)
+
+        # Step 3: Extract Edges and Weights
+        edges_data = []
+        for t in range(num_timepoints):
+            for i, row in roi_edges.iterrows():
+                roi1 = row['ROI1']
+                roi2 = row['ROI2']
+                weight = correlations.iloc[i, t]
+                edges_data.append([roi1, roi2, weight, t])
+        edges_df = pd.DataFrame(edges_data, columns=['Source', 'Target', 'Weight', 'Time Point'])
+
+        # Step 4: Summary Statistics (can still be done for the averaged graph or global)
+        summary_stats = {
+            'Number of Nodes': G.number_of_nodes(),
+            'Number of Edges': G.number_of_edges(),
+            'Density': nx.density(G),
+            'Time Points': num_timepoints
+        }
+        summary_df = pd.DataFrame.from_dict(summary_stats, orient='index', columns=['Value'])
+
+        # Save the results after processing this region for the current subject
+        save_subject_results(subject_code, region, embeddings_df, properties_df_flat, edges_df, summary_df)
