@@ -1,0 +1,320 @@
+import numpy as np
+import pandas as pd
+import os
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+# Step 1: Load the Time Series Data
+# Assuming the file is a simple space or tab-delimited text file, we can use pandas to load it
+file_path = 'C:/Users/thaplood2/Desktop/Testing/std.20.aparc35.ts.wb.1D.dset'
+time_series_data = pd.read_csv(file_path, delim_whitespace=True, header=None)
+
+# Print the shape and inspect the data (should be 68 regions x 153 time points)
+print(f"Loaded data shape: {time_series_data.shape}")
+print(time_series_data.head())
+
+# Step 2: Choose the Region of Interest
+# Let's assume you want to focus on region 0 (can change this to any region index between 0 and 67)
+region_idx = 29
+region_time_series = time_series_data.iloc[region_idx, :]
+
+# Check the time series for the selected region
+print(f"Time series for region {region_idx}:")
+print(region_time_series.head())
+
+# Step 3: Visualize the time series for the selected region
+plt.figure(figsize=(10, 5))
+plt.plot(region_time_series)
+plt.title(f'Time Series for Region {region_idx}')
+plt.xlabel('Time Points')
+plt.ylabel('Signal')
+plt.show()
+
+def perform_jackknife_resampling(region_ts, output_dir):
+    """
+    Perform jackknife resampling on the time series of a single region,
+    removing one time point at a time, and save the results as CSV files.
+    
+    Parameters:
+    - region_ts: Series with the time series of the selected region (151 time points)
+    - output_dir: Directory where the CSV files will be saved
+    
+    Returns:
+    - jackknife_samples: A list of DataFrames, each representing the time series after removing one time point
+    """
+    num_time_points = region_ts.shape[0]  # 151 time points
+    jackknife_samples = []
+
+    # Create the output directory if it doesn't exist
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    # Loop over all time points and remove them one by one
+    for time_point_to_remove in range(num_time_points):
+        # Remove the selected time point from the region's time series
+        jackknife_sample = region_ts.drop(index=[time_point_to_remove])
+        
+        # Print the shape of the remaining time series
+        print(f"Remaining time series shape after removing time point {time_point_to_remove}: {jackknife_sample.shape}")
+
+        # Save the jackknife sample as a CSV file
+        jackknife_sample_csv_path = os.path.join(output_dir, f'jackknife_sample_{time_point_to_remove}.csv')
+        jackknife_sample.to_csv(jackknife_sample_csv_path, index=False, header=False)
+        print(f"Jackknife sample (after removing time point {time_point_to_remove}) saved at: {jackknife_sample_csv_path}")
+        
+        # Store the resulting jackknife sample
+        jackknife_samples.append(jackknife_sample)
+    
+    return jackknife_samples
+
+# Example usage of the function (assuming region_time_series is defined):
+output_dir = 'C:/Users/thaplood2/Desktop/Testing/100206_region_29'  # Update this path as needed
+jackknife_samples = perform_jackknife_resampling(region_time_series, output_dir)
+
+# Output the jackknife samples
+for idx, sample in enumerate(jackknife_samples):
+    print(f"Jackknife sample {idx}:\n{sample}\n")
+import os
+import pandas as pd
+import numpy as np
+
+def load_jackknife_samples(file_paths):
+    """
+    Load jackknife samples from CSV files.
+    
+    Parameters:
+    - file_paths: List of paths to the CSV files for the jackknife samples
+    
+    Returns:
+    - samples: List of DataFrames loaded from the CSV files
+    """
+    samples = [pd.read_csv(file, header=None) for file in file_paths]
+    return samples
+
+def calculate_correlation_between_regions(region1_files, region2_files, output_file):
+    """
+    Calculate correlation between the time series of two regions after jackknife resampling
+    and output the results in a single CSV file.
+    
+    Parameters:
+    - region1_files: List of paths to CSV files for region 1 jackknife samples
+    - region2_files: List of paths to CSV files for region 2 jackknife samples
+    - output_file: Path to the CSV file where correlation results will be saved
+    
+    Returns:
+    - correlations: List of correlation values between region 1 and region 2 for each jackknife sample
+    """
+    correlations = []
+
+    # Ensure both regions have the same number of jackknife files
+    assert len(region1_files) == len(region2_files), "Mismatch in the number of jackknife sample files between regions."
+
+    # Load jackknife samples
+    region1_samples = load_jackknife_samples(region1_files)
+    region2_samples = load_jackknife_samples(region2_files)
+
+    # Loop through each pair of jackknife samples and calculate correlation
+    for i, (sample1, sample2) in enumerate(zip(region1_samples, region2_samples)):
+        # Convert samples to numpy arrays for correlation calculation
+        sample1_array = np.array(sample1).flatten()
+        sample2_array = np.array(sample2).flatten()
+
+        # Calculate Pearson correlation between region 1 and region 2 jackknife samples
+        corr = np.corrcoef(sample1_array, sample2_array)[0, 1]
+        correlations.append(corr)
+
+        # Print correlation result
+        print(f"Correlation (after removing time point {i}): {corr}")
+
+    # Save all correlation values to a single CSV file
+    corr_df = pd.DataFrame(correlations, columns=['Correlation'])
+    corr_df.to_csv(output_file, index_label='Time Point Removed')
+    print(f"All correlations saved at: {output_file}")
+
+    return correlations
+
+# Example usage:
+region1_dir = 'C:/Users/thaplood2/Desktop/Testing/100206_region_1//'  # Directory with CSV files for region 1
+region2_dir = 'C:/Users/thaplood2/Desktop/Testing/100206_region_29//'  # Directory with CSV files for region 2
+output_file = 'C:/Users/thaplood2/Desktop/Testing/correlation_region1_region29.csv'  # Single output CSV file
+
+# Get the list of CSV files for both regions
+region1_files = [os.path.join(region1_dir, f) for f in sorted(os.listdir(region1_dir)) if f.endswith('.csv')]
+region2_files = [os.path.join(region2_dir, f) for f in sorted(os.listdir(region2_dir)) if f.endswith('.csv')]
+
+# Calculate correlations between the jackknife samples for region 1 and region 2
+correlations = calculate_correlation_between_regions(region1_files, region2_files, output_file)
+
+# Output the correlations
+print("Correlations between region 1 and region 2 for each jackknife sample:\n", correlations)
+
+import numpy as np
+from scipy.stats import pearsonr
+
+# Load the actual dataset
+ts_all = np.loadtxt('C:/Users/thaplood2/Desktop/Testing/std.20.aparc35.ts.wb.1D.dset')
+
+ts_all.shape
+for i in range(ts_all.shape[1]):
+    tmp1 = np.delete(ts_all, i, 1)
+
+for i in range(ts_all.shape[1]-1):
+    tmp2 = np.delete(ts_all, i-1, 1)
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy.stats import pearsonr
+
+def matrix_pearsonr(ts):
+    ts_row_num = ts.shape[0]
+    C = np.zeros(shape=(ts_row_num, ts_row_num))
+    P = np.zeros(shape=(ts_row_num, ts_row_num))
+    for i in range(ts_row_num):
+        for j in range(ts_row_num):
+            C[i, j], P[i, j] = pearsonr(ts[i,:], ts[j,:])
+          
+    return C, P
+    
+def computedJCpearson(ts, n):
+    """
+    Compute jc correlations
+    :param ts: Time-series of MxN
+    :param n: num of time points to be deleted
+    :return: Correlations, upper-diagonal of correlations and corresponding p-values
+    """
+    CC = []
+    P = []
+    for i in range(ts.shape[1]-(n-1)):
+        tmp = ts.copy()
+        for j in range(n):
+            tmp = np.delete(tmp, i, 1)
+            print("timepoint: ", i, " # ", j, tmp.shape)
+        corrTP, p = matrix_pearsonr(tmp)
+        CC.append(corrTP)
+        P.append(p)
+    
+    return np.asarray(CC), np.asarray(P)
+
+
+cc, p = computedJCpearson(ts_all, 1)
+tmp2
+tmp1
+
+import numpy as np
+import pandas as pd
+from scipy.stats import pearsonr
+
+# Load the actual dataset
+ts_all = np.loadtxt('C:/Users/thaplood2/Desktop/Testing/std.20.aparc35.ts.wb.1D.dset')
+
+# Function to compute Pearson correlation matrix and p-values
+def matrix_pearsonr(ts):
+    ts_row_num = ts.shape[0]
+    C = np.zeros(shape=(ts_row_num, ts_row_num))
+    P = np.zeros(shape=(ts_row_num, ts_row_num))
+    for i in range(ts_row_num):
+        for j in range(ts_row_num):
+            C[i, j], P[i, j] = pearsonr(ts[i, :], ts[j, :])
+    return C, P
+
+# Function to compute jackknife Pearson correlations
+def computedJCpearson(ts, n):
+    """
+    Compute jackknife correlations by deleting 'n' time points.
+    :param ts: Time-series of MxN (regions x time points)
+    :param n: Number of time points to be deleted at each iteration
+    :return: List of correlation matrices and p-values
+    """
+    CC = []  # To store correlation matrices for each iteration
+    P = []   # To store p-values for each iteration
+    
+    num_iterations = ts.shape[1] - (n - 1)  # Calculate the number of iterations where you can delete 'n' points
+    
+    for i in range(num_iterations):  # Iterate over possible time point removal windows
+        # Create a temporary copy of the original dataset
+        tmp = np.delete(ts, slice(i, i + n), axis=1)  # Delete 'n' time points starting at index 'i'
+        
+        # Print the shape after deletion for debugging
+        print(f"Time points deleted: {i}-{i+n-1}, New shape: {tmp.shape}")
+        
+        # Compute Pearson correlation and p-values on reduced data
+        corrTP, p = matrix_pearsonr(tmp)
+        CC.append(corrTP)  # Store correlation matrix
+        P.append(p)        # Store p-values
+    
+    return np.asarray(CC), np.asarray(P)
+
+# Example of how to call the function
+n = 5  # Number of time points to delete
+CC, P = computedJCpearson(ts_all, n)
+
+# Check the shape of the correlation matrices and p-values
+print("Shape of CC (correlation matrices):", CC.shape)  # Expect (147, 68, 68) if all time points are processed
+print("Shape of P (p-values):", P.shape)  # Expect (147, 68, 68)
+
+# Saving the correlation matrices and p-values to separate CSV files
+np.savetxt('jackknife_correlations_5.csv', CC.reshape(-1, CC.shape[1] * CC.shape[2]), delimiter=',')
+np.savetxt('jackknife_pvalues_5.csv', P.reshape(-1, P.shape[1] * P.shape[2]), delimiter=',')
+
+print("Jackknife correlations and p-values saved to CSV files.")
+
+# Threshold p-value (e.g., p < 0.05)
+p_threshold = 0.05
+
+# Filter correlations based on the p-value threshold
+filtered_CC = CC.copy()  # Copy the correlation matrix
+filtered_CC[P >= p_threshold] = 0  # Set correlations to zero where p-value is above the threshold
+
+# Save the filtered correlations (significant ones only) to a CSV file
+np.savetxt('filtered_jackknife_correlations_5.csv', filtered_CC.reshape(-1, CC.shape[1] * CC.shape[2]), delimiter=',')
+
+print(f"Filtered correlations (p < {p_threshold}) saved to 'filtered_jackknife_correlations_5.csv'.")
+
+import pandas as pd
+
+# Load CSV file
+csv_file = "C:/Users/thaplood2/Documents/filtered_jackknife_correlations_5.csv"  # Replace with your actual file path
+data = pd.read_csv(csv_file, header=None)
+
+# Print shape of the loaded data
+print("Shape of the data from CSV:", data.shape)
+
+import numpy as np
+import pandas as pd
+
+# Load the CSV file (assuming you have already dropped the extra row)
+csv_file = "C:/Users/thaplood2/Documents/jackknife_correlations_5.csv"  # Replace with your actual file path
+data = pd.read_csv(csv_file, header=None)
+
+# Convert the DataFrame to a NumPy array
+data_array = data.values
+
+# Reshape the array into (147, 68, 68)
+CC = data_array.reshape((147, 68, 68))
+
+# Now we want to extract the correlation values for all region pairs across the 147 time points
+
+# Initialize a dictionary to store the correlations for each region pair
+# The key will be a tuple (region1, region2) and the value will be a list of 147 correlation values
+region_pair_correlations = {}
+
+# Loop through each pair of regions
+for region1 in range(68):
+    for region2 in range(region1, 68):  # Only look at the upper triangle (including the diagonal)
+        # Extract correlation values for this region pair across the 147 jackknife samples
+        correlation_values = CC[:, region1, region2]
+        
+        # Store these values in the dictionary
+        region_pair_correlations[(region1, region2)] = correlation_values
+
+# Now you have a dictionary `region_pair_correlations` with the correlation values for each region pair
+
+# Optionally, you can save the correlation values for each region pair into a CSV file
+with open("region_pair_correlations.csv", "w") as f:
+    f.write("Region1,Region2," + ",".join([f"Time{i+1}" for i in range(147)]) + "\n")
+    for (region1, region2), values in region_pair_correlations.items():
+        f.write(f"{region1},{region2}," + ",".join(map(str, values)) + "\n")
+
+print("Correlation values for each region pair across 147 jackknife samples have been saved to 'region_pair_correlations.csv'.")
